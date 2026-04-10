@@ -1,4 +1,4 @@
-# NBA Player Hall-of-Fame Predictor: 
+# NBA Player All-Star Predictor:
 
 # Motivation and Inspiration:
 
