@@ -16,6 +16,24 @@ df_team_abbr = pd.read_excel(data_path, sheet_name=7)
 # print(df_data)
 df_data.columns = df_data.columns.str.strip()
 df_data = df_data.drop(['Games Started', 'Unnamed: 0'], axis=1)
+
+def convert_height(height_str):
+    try:
+        if pd.isna(height_str) or not isinstance(height_str, str):
+            return 0
+        # This handles both "6-11" and "6'11"
+        parts = height_str.replace("'", "-").split('-')
+        
+        feet = int(parts[0])
+        inches = int(parts[1]) if len(parts) > 1 else 0
+        
+        return (feet * 12) + inches
+    except:
+        return 0
+
+df_data['Height_Inches'] = df_data['Height'].apply(convert_height)
+df_data = df_data.drop('Height', axis=1)
+
 df_clean = df_data.dropna(subset=['Player'])
 
 print(df_clean)
@@ -30,6 +48,7 @@ target = df_clean.pop('All Star')
 # 2. Put it back in at the end
 df_clean['All Star'] = target
 print(df_clean)
+
 
 
 
