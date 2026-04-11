@@ -1,6 +1,8 @@
 import pandas as pd 
 import numpy as np 
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 from pathlib import Path
 
 # df_data = pd.read_excel("/Users/ayushsarkar/nba-hof-pred/nba-hof-pred/source/NBA ALL STAR DATA.xlsx", sheet_name=1)
@@ -36,9 +38,9 @@ df_data = df_data.drop('Height', axis=1)
 
 df_clean = df_data.dropna(subset=['Player'])
 
-print(df_clean)
+# print(df_clean)
 # confirms the rest of the nulls are within field goal % related stats
-print(df_clean.isnull().sum()) 
+# print(df_clean.isnull().sum()) 
 
 # setting these to 0, players didn't shoot certain shots (can't divide by 0 --> just set to 0)
 df_clean = df_clean.fillna(0)
@@ -47,9 +49,67 @@ df_clean = df_clean.fillna(0)
 target = df_clean.pop('All Star')
 # 2. Put it back in at the end
 df_clean['All Star'] = target
-print(df_clean)
+# print(df_clean)
 
+# ---------------------------------
+# PREPROCESSING for training
+# ---------------------------------
 
+''' List of features: 
+Player, Season Ending Year
 
+- era based stats:
+FGA per game, 2PA per game, 3PA per game, FTA per game            
+ORB per game, DRB per game, TRB per game, AST per game, STL per game, BLK per game, TOV per game, PF per game, PTS per game             
+FG%, 2P%, 3P%, FT%, eFG%   
 
+- other stats:
+Age, Games, Minutes per game, # Team Games, Team Win %          
+Height_Inches, Weight, Prev All Stars
+
+- non numerical:
+Pos, Team
+
+Target:
+All Star 
+'''
+# want to use other for data exploration
+df_preproc = df_clean.copy(deep=True)
+
+# these columns are stats that are affected by era
+era_stats = [
+    "FGA per game", "2PA per game", "3PA per game", "FTA per game", "ORB per game", "DRB per game", 
+    "TRB per game", "AST per game", "STL per game", "BLK per game", "TOV per game", "PF per game", "PTS per game", 
+    "FG%", "2P%", "3P%","FT%", "eFG%"
+]
+
+for col in era_stats:
+    df_preproc[col] = df_preproc.groupby('Season Ending Year')[col].transform(
+        lambda x: (x - x.mean()) / x.std() if x.std() != 0 else x
+        # this is equivalent to standard scaler
+    )
+
+other_stats = [
+    "Age", "Games", "Minutes per game", "# Team Games", 
+    "Team Win %", "Height_Inches", "Weight", "Prev All Stars"
+]
+global_scaler = StandardScaler()
+df_preproc[other_stats] = global_scaler.fit_transform(df_preproc[other_stats])
+
+print(df_preproc)
+
+# 
+
+categorical_cols = ['Pos', 'Team']
+
+# One-Hot Encoding
+df_preproc = pd.get_dummies(df_preproc, columns=categorical_cols, drop_first=True)
+
+# verify new columns
+print(f"New shape of dataframe: {df_preproc.shape}")
+print(df_preproc.columns) 
+
+# -------------------------
+# SPLITTING DATA
+# -------------------------
 
