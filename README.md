@@ -55,10 +55,10 @@ We plan to implement and compare the following models:
 - **Logistic Regression (with Boosting)**
 
   <!-- Specify boosting method (e.g., AdaBoost, Gradient Boosting) -->
-- **K-Nearest Neighbors (KNN)**
+- **Support Vector Machines (SVM)**
 
-  <!-- Specify distance metric, choice of k -->
-
+  <!-- Specify kernel (e.g., linear, RBF), regularization parameter C, and gamma -->  
+x`
 <!-- 
 Optional additions:
 - Hyperparameter tuning
