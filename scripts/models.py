@@ -25,7 +25,8 @@ def evaluate_model(model, X_set, y_true, set_name="Validation"):
     """Prints a detailed performance report for the model."""
     predictions = model.predict(X_set)
     print(f"--- {set_name} Performance ---")
-    print(classification_report(y_true, predictions))
+    report = classification_report(y_true, predictions)
+    print(report)
     
     # The Confusion Matrix shows exactly how many All-Stars were missed
     cm = confusion_matrix(y_true, predictions)
@@ -39,3 +40,4 @@ def evaluate_model(model, X_set, y_true, set_name="Validation"):
     
     print("--- Detailed Confusion Matrix ---")
     print(cm_df)
+    return classification_report(y_true, predictions, output_dict=True)

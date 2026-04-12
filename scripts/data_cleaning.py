@@ -122,12 +122,12 @@ y = df_preproc['All Star']
 X = df_preproc.drop(columns=['All Star', 'Player', 'Season Ending Year'])
 
 X_train_val, X_test, y_train_val, y_test = train_test_split(
-    X, y, test_size=0.20, random_state=42, stratify=y
+    X, y, test_size=0.10, random_state=42, stratify=y
 )
 
 X_train, X_val, y_train, y_val = train_test_split(
-    X_train_val, y_train_val, test_size=0.25, random_state=42, stratify=y_train_val
+    X_train_val, y_train_val, test_size=0.11, random_state=42, stratify=y_train_val
 )
 
-# should be 60%, 20%, 20%
+# should be 80%, 10%, 10%
 print(f"Train size: {len(X_train)} | Val size: {len(X_val)} | Test size: {len(X_test)}")
