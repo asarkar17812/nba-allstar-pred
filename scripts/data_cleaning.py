@@ -231,6 +231,8 @@ stat_cols = [
     'PF per game','PTS per game'
 ]
 
+df_eda = df_data.copy(deep=True)
+
 df_data[stat_cols] = df_data.groupby(
     "Season Ending Year"
 )[stat_cols].transform(
