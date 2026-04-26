@@ -1,245 +1,182 @@
 # NBA All-Star Prediction
 
-This project models NBA All-Star selection as a **structured, competitive ranking problem** rather than independent classification.
+## Overview
 
-Selections are:
-- **relative within (season, conference)**
-- **constrained by roster rules**
-- **dependent across players**
+This project models NBA All-Star selection as a **structured ranking problem**, rather than a standard binary classification task.
 
-The pipeline is built to preserve that structure from preprocessing through evaluation.
+Each season is partitioned by conference, and selections are made under fixed constraints:
+- 2 backcourt starters  
+- 3 frontcourt starters  
+- 7 reserves  
 
----
+The objective is not simply to predict probabilities, but to **rank players within competitive groups and construct valid rosters**.
 
-## Problem Framing
-
-Instead of predicting:
-> “Is this player an All-Star?”
-
-we model:
-> “How does this player rank within their competitive pool?”
-
-Formally, for a group $G_{s,c}$ (season $s$, conference $c$), we learn a scoring function:
-$$
-f(x_i) \rightarrow \mathbb{R}
-$$
-
-and selection is:
-$$
-\text{TopK}(f(x_i)) \quad \text{subject to roster constraints}
-$$
+Two modeling approaches are implemented:
+- A structured neural network with attention and multi-objective loss  
+- A hybrid logistic regression model combining pointwise and pairwise learning  
 
 ---
 
 ## Data Pipeline
 
-The preprocessing pipeline is designed around a single constraint:
+The dataset is constructed from multiple historical sources and normalized to ensure consistency across eras.
 
-> **Preserve relative performance within each season while preventing leakage across seasons.**
+### Key preprocessing decisions
 
----
+- Team identities are canonicalized to handle relocations and naming changes  
+- Conference labels are deterministically assigned from team mappings  
+- Position is reduced to **Backcourt vs Frontcourt** to reflect roster constraints  
+- Low-signal players (few games / low minutes) are filtered unless selected  
+- Missing values are imputed **within each season** using kNN (k = 5)  
+- Numerical features are standardized within-season to remove era effects  
 
-## Preprocessing Design
+### Example normalization
 
-### Canonical Team Mapping
-
-Franchise identity is normalized across time:
-- resolves relocations
-- ensures grouping consistency
-
-Grouping key:
-$$
-G = (\text{Season}, \text{Conference})
-$$
+Instead of comparing raw scoring across eras:
+  x’ = (x − μ_season) / σ_season
+This preserves **relative performance within a season**, which is what voting implicitly reflects.
 
 ---
 
-### Structural Missingness
+## Problem Formulation
 
-Certain NaNs are deterministic:
-$$
-\text{3P\%} =
-\begin{cases}
-0 & \text{if } \text{3PA} = 0 \\
-\text{observed} & \text{otherwise}
-\end{cases}
-$$
+Let each group be defined by:
+  G = (season, conference)
+  
+For players \( i ∈ G \), the model produces scores:
+  s_i = starter score
+  r_i = reserve score
 
-Handled before imputation.
+Final ranking score:
+  score_i = 0.3 * s_i + 0.7 * r_i
 
----
-
-### Season-wise Normalization
-
-Raw stats are not comparable across eras. We normalize within season:
-
-$$
-x' = \frac{x - \mu_s}{\sigma_s}
-$$
-
-where:
-- $\mu_s$ = season mean  
-- $\sigma_s$ = season standard deviation  
-
-This preserves **relative standing**.
+Selection is then performed under constraints:
+  Top 2 backcourt (starters)
+  Top 3 frontcourt (starters)
+  Top 7 remaining (reserves)
 
 ---
 
-### Season-wise Imputation
+## Neural Network Model
 
-For each season $s$:
+### Architecture
 
-1. Standardize features:
-$$
-X_s \rightarrow \tilde{X}_s
-$$
+- Feature MLP → representation
+- Embeddings:
+  - Conference
+  - Position group
+  - Season
+- Multi-head self-attention across players within a group
+- Two output heads:
+  - Starter head
+  - Reserve head
 
-2. Apply KNN imputation:
-$$
-\tilde{X}_s^{\text{imputed}} = \text{KNN}(\tilde{X}_s)
-$$
-
-3. Inverse transform:
-$$
-X_s^{\text{final}} = \sigma_s \tilde{X}_s^{\text{imputed}} + \mu_s
-$$
-
-This prevents leakage across seasons.
+This allows the model to capture **relative interactions between players**, not just independent scores.
 
 ---
 
-### Filtering
+### Training Objectives
 
-Players are kept if:
-$$
-(\text{Games} \ge 20 \land \text{Minutes} \ge 10) \lor (\text{AllStar} = 1)
-$$
+The model is trained using a combination of structured losses.
 
----
+#### 1. Soft Selection Loss
 
-## Models
-
-### Hybrid Logistic Regression
-
-We combine pointwise and pairwise predictions:
-
-$$
-p_i = \alpha \cdot p_i^{\text{point}} + (1 - \alpha) \cdot p_i^{\text{pair}}
-$$
-
-Pairwise model learns:
-$$
-P(i > j) = \sigma(w^\top (x_i - x_j))
-$$
-
-Temperature scaling:
-$$
-p_i' = \sigma\left(\frac{\log\left(\frac{p_i}{1-p_i}\right)}{T}\right)
-$$
-
----
-
-### Neural Network
-
-Two-head architecture:
-
-- starter score: $s_i$
-- reserve score: $r_i$
-
-Final score:
-$$
-\hat{y}_i = \sigma(0.3 \cdot s_i + 0.7 \cdot r_i)
-$$
-
----
-
-### Soft Selection (Training Objective)
-
-Instead of hard top-$k$, we use:
-
-$$
-z_i = k \cdot \frac{e^{s_i / \tau}}{\sum_j e^{s_j / \tau}}
-$$
+Approximates top-k selection using a temperature-scaled softmax:
+  z_i = k * softmax(s_i / τ)
 
 Target distribution:
-$$
-t_i = \frac{k \cdot y_i}{\sum_j y_j}
-$$
+  target_i = k * y_i / sum(y)
 
-Selection loss:
-$$
-\mathcal{L}_{\text{select}} = \frac{1}{n} \sum_i (z_i - t_i)^2
-$$
+Loss:
+  L_select = mean((z − target)^2)
 
 ---
 
-### Pairwise Loss
+#### 2. Pairwise Ranking Loss
 
-$$
-\mathcal{L}_{\text{pair}} =
-\mathbb{E}_{i \in \text{pos}, j \in \text{neg}}
-\left[ \max(0, m - (s_i - s_j)) \right]
-$$
+Encourages correct ordering between selected and non-selected players:
+  L_pair = mean(max(0, m − (s_pos − s_neg)))
 
 ---
 
-### Full Objective
+#### 3. Binary Classification Loss
 
-$$
-\mathcal{L} =
-\mathcal{L}_{\text{select}} +
-\lambda_1 \mathcal{L}_{\text{pair}} +
-\lambda_2 \mathcal{L}_{\text{BCE}}
-$$
+Standard calibration term:
+  L_bce = BCE(s_i + r_i, y_i)
 
 ---
 
-## Structured Selection
+#### 4. Constraint Regularization
 
-For each group $G_{s,c}$:
+Encodes roster structure:
 
-$$
-\begin{aligned}
-\text{Starters}_{BC} &= \text{Top-2}_{BC} \\
-\text{Starters}_{FC} &= \text{Top-3}_{FC} \\
-\text{Reserves} &= \text{Top-7 remaining}
-\end{aligned}
-$$
+- Backcourt proportion constraint
+- Starter/reserve overlap penalty
 
 ---
 
-## Evaluation
-
-### Global Metrics
-
-- AUC:
-$$
-\text{AUC} = P(f(x^+) > f(x^-))
-$$
-
-- Precision:
-$$
-\frac{TP}{TP + FP}
-$$
-
-- Recall:
-$$
-\frac{TP}{TP + FN}
-$$
+### Final Loss
+  L = L_select + λ_pair * L_pair + λ_bce * L_bce + regularization
 
 ---
 
-### Structured Metrics
+## Logistic Regression Model
 
-Top-K Recall:
-$$
-\frac{\text{# correctly selected All-Stars}}{\text{# true All-Stars}}
-$$
+### Design
 
-Top-12 Accuracy:
-$$
-\frac{\text{# correct selections}}{12}
-$$
+A hybrid model combining:
+
+1. **Pointwise model**
+   P(y = 1 | x)
+2. **Pairwise model**
+   P(i > j) = σ(w^T (x_i − x_j))
+
+---
+
+### Pairwise Dataset Construction
+
+For each group:
+  (x_i − x_j, 1) : if i is All-Star, j is not (x_j − x_i, 0)
+
+This transforms ranking into a binary classification problem.
+
+---
+
+### Final Prediction
+  p = α * p_point + (1 − α) * p_pair
+
+Temperature scaling:
+  logit = log(p / (1 − p)) / T
+
+---
+
+## Evaluation Methodology
+
+Evaluation mirrors the actual selection process.
+
+### Step 1: Score all players  
+### Step 2: Apply structured selection  
+### Step 3: Compute metrics  
+
+---
+
+### Metrics
+
+#### Global
+- AUC (ranking quality)
+- Accuracy
+- Precision
+- Recall
+- F1
+
+#### Structured Metrics
+- **Top-12 Recall**: fraction of true All-Stars selected  
+- **Top-12 Accuracy**: fraction of selected players who are correct  
+
+#### Grouped Evaluation
+- Per (season, conference)
+- Per season overall
+- Average across seasons
 
 ---
 
@@ -247,58 +184,110 @@ $$
 
 ### Neural Network
 
-| Metric    | Value  |
-|----------|--------|
-| AUC      | 0.9827 |
+#### Training Summary
+
+| Metric        | Value |
+|---------------|-------|
+| Initial Loss  | 18.02 |
+| Final Loss    | 4.63  |
+| Best Val AUC  | 0.9888 |
+| Epochs        | 80    |
+
+#### Final Performance
+
+| Metric | Value |
+|--------|------|
+| AUC | 0.9827 |
 | Accuracy | 0.9740 |
-| Precision| 0.8333 |
-| Recall   | 0.7547 |
-| F1 Score | 0.7921 |
+| Precision | 0.8333 |
+| Recall | 0.7547 |
+| F1 | 0.7921 |
 
 ---
 
 ### Logistic Regression
 
-| Metric    | Value  |
-|----------|--------|
-| AUC      | 0.9872 |
+#### Model Selection
+
+| Metric | Value |
+|--------|------|
+| Best C | 2.1544 |
+| Val AUC Range | 0.9850 – 0.9862 |
+| Val Top-K Range | 0.7468 – 0.7595 |
+
+#### Final Performance
+
+| Metric | Value |
+|--------|------|
+| AUC | 0.9872 |
 | Accuracy | 0.9678 |
-| Precision| 0.7813 |
-| Recall   | 0.7075 |
-| F1 Score | 0.7426 |
+| Precision | 0.7813 |
+| Recall | 0.7075 |
+| F1 | 0.7426 |
+
+---
+
+## Comparison (To be updated)
+
+| Metric | Neural Network | Logistic Regression |
+|--------|--------------|---------------------|
+| AUC | 0.9827 | **0.9872** |
+| Accuracy | **0.9740** | 0.9678 |
+| Precision | **0.8333** | 0.7813 |
+| Recall | **0.7547** | 0.7075 |
+| F1 | **0.7921** | 0.7426 |
+| Top-12 Recall | **0.7553** | 0.7083 |
+| Top-12 Accuracy | **0.8333** | 0.7813 |
 
 ---
 
 ## Interpretation
 
-- Logistic regression optimizes:
-$$
-\max P(f(x^+) > f(x^-))
-$$
-
-- Neural network optimizes:
-$$
-\text{selection consistency under constraints}
-$$
-
-This explains:
-- higher AUC for logistic regression  
-- better final rosters for neural network  
+- Logistic regression achieves slightly higher AUC, indicating strong ranking calibration  
+- The neural network consistently outperforms in **selection-based metrics**  
+- This suggests that:
+  - Linear models capture global signal well  
+  - Structured models better capture **competition and roster constraints**
 
 ---
 
 ## Key Takeaways
 
-- The task is fundamentally:
-$$
-\text{constrained ranking}, \not\; \text{classification}
-$$
-
-- Correct preprocessing is critical:
-$$
-\text{preserve structure} \gg \text{maximize raw signal}
-$$
-
-- Selection-aware training improves real-world performance
+- All-Star selection is fundamentally a **structured ranking problem**
+- Group-relative features are critical for performance
+- Pairwise learning significantly improves ranking quality
+- Explicit constraint modeling leads to better real-world outcomes
 
 ---
+
+## Future Work
+
+- Incorporate voting data (fan/media/player splits)  
+- Model temporal dynamics explicitly  
+- Explore graph-based player interaction models  
+- Improve calibration between starter and reserve heads  
+
+---
+
+## Repository Structure (To be updated)
+  source/
+  cleaned/
+    cleaned_data.csv
+  uncleaned/
+    NBA ALL STAR DATA.xlsx
+
+notebooks/
+  neural_net.ipynb
+  log_reg.ipynb
+  svm.ipynb
+
+---
+
+## Notes
+
+This project prioritizes:
+- Interpretability of modeling decisions  
+- Alignment with real-world selection constraints  
+- Robustness across eras and seasons  
+
+The goal is not just prediction accuracy, but **faithfully modeling how selections are actually made**.
