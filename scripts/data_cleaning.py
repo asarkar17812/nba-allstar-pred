@@ -231,6 +231,8 @@ stat_cols = [
     'PF per game','PTS per game'
 ]
 
+df_eda = df_data.copy(deep=True)
+
 df_data[stat_cols] = df_data.groupby(
     "Season Ending Year"
 )[stat_cols].transform(
@@ -256,4 +258,7 @@ df_data = df_data[df_data["Season Ending Year"] != 1999]
 print("Final shape:", df_data.shape)
 print(df_data.describe())
 
-df_data.to_csv("source\\cleaned\\cleaned_data.csv", index=False)
+'''
+Commented out to avoid making duplicates
+'''
+# df_data.to_csv("source\\cleaned\\cleaned_data.csv", index=False)
